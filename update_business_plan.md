@@ -79,9 +79,8 @@
 - Sustainable revenue covering renewal costs
 
 ## Dependencies
-- API key: aa_live_bF1VTeER52VXKn7mtZ4MvKbdUOHTPs9Qe_t89mqd4vc
+- API key: (in .env)
 - Python 3.x environment with required packages
-- Access to well-knowns repo in Documents/
 
 ## Next Steps After Initial Improvements
 1. Monitor sales and query patterns

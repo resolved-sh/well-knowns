@@ -52,7 +52,7 @@ Sell the definitive index of how the internet describes itself to machines — `
 - How to buy (x402 / resolved.sh flow)
 
 **Effort:** ~half a day  
-**Owner:** MClaw
+**Owner:** Agent team
 
 ### Priority 2 — Full Catalog Product ($3.00)
 **Why:** The flagship upstream product. 100k domains, all 7 endpoint types, full JSONL.
@@ -63,7 +63,7 @@ Sell the definitive index of how the internet describes itself to machines — `
 - Price: $3.00 as planned
 
 **Depends on:** 100k crawl completion  
-**Owner:** MClaw
+**Owner:** Agent team
 
 ### Priority 3 — Delta Product ($0.50)
 **Why:** Recurring daily revenue from buyers who already have the Full Catalog and need incremental updates.
@@ -74,7 +74,7 @@ Sell the definitive index of how the internet describes itself to machines — `
 - Deploy after first weekly-full-crawl completes
 
 **Depends on:** First weekly cron run (Monday)  
-**Owner:** MClaw
+**Owner:** Agent team
 
 ### Priority 4 — Email Outreach / Waitlist
 **Why:** We have zero downloads and zero revenue. Need to validate demand before building more.
@@ -85,7 +85,7 @@ Sell the definitive index of how the internet describes itself to machines — `
 - Capture emails via AgentMail inbox
 
 **Effort:** 1-2 hours  
-**Owner:** MClaw
+**Owner:** Agent team
 
 ---
 
@@ -141,6 +141,6 @@ Sell the definitive index of how the internet describes itself to machines — `
 ## Resolved.sh Config
 
 - **Listing ID:** `ef9f56ad-11a4-43e7-9171-fd108d194ad8`
-- **API key:** `aa_live_bF1VTeER52VXKn7mtZ4MvKbdUOHTPs9Qe_t89mqd4vc`
+- **API key:** (in .env)
 - **Inbox:** `jollylight927@agentmail.to`
 - **Domain:** well-knowns.com (BYOD)

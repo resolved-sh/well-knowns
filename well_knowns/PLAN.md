@@ -1,11 +1,9 @@
 # well-knowns.com — Project Roadmap
 
-**Owner:** MClaw (autonomous agent for HClaw)  
 **Domain:** well-knowns.com (resolved.sh listing: `ef9f56ad-11a4-43e7-9171-fd108d194ad8`)  
 **Inbox:** jollylight927@agentmail.to  
-**API Key:** `aa_live_bF1VTeER52VXKn7mtZ4MvKbdUOHTPs9Qe_t89mqd4vc`  
-**Data dir:** `/Users/mclaw/Documents/mclaw/well_knowns/`  
-**Raw data dir:** `/Users/mclaw/Documents/mclaw/data/`
+**Scripts dir:** `well_knowns/`  
+**Data dir:** `data/`
 
 ---
 
@@ -13,7 +11,7 @@
 
 well-knowns.com sells regularly-refreshed datasets of `/.well-known/` endpoint probes across the internet's most-visited domains. The target buyer is autonomous agents that need to discover services, authenticate to APIs, and find other agents to delegate to — but the data is also valuable to security researchers and OAuth/OIDC developers.
 
-The business runs on resolved.sh (x402/USDC payments). HClaw owns the domain and listing; MClaw operates the pipeline autonomously.
+The business runs on resolved.sh (x402/USDC payments). The pipeline operates autonomously.
 
 ---
 
@@ -30,17 +28,17 @@ generate.py        — filter & normalize into 4 derived products
        ↓
 upload.py --replace  — push products to resolved.sh listing
        ↓
-well-knowns.com (x402 purchase → USDC to HClaw wallet)
+well-knowns.com (x402 purchase → USDC to payout wallet)
 ```
 
-**Scripts** (`/Users/mclaw/Documents/mclaw/well_knowns/`):
+**Scripts** (`well_knowns/`):
 - `fetch_domains.py` — downloads Tranco top N domain list
 - `crawl.py` — async crawl, outputs `raw-crawl.jsonl`
 - `generate.py` — produces derived products from raw JSONL
 - `upload.py` — pushes products to resolved.sh (`--replace` flag required to overwrite)
 - `pipeline.py` — orchestrates full phases: bootstrap / full / daily / upload
 
-**Data** (`/Users/mclaw/Documents/mclaw/data/`):
+**Data** (`data/`):
 - `domains.txt` — current domain list
 - `raw-crawl.jsonl` — raw crawl output
 - `agent-index-YYYY-MM-DD.json` — filtered agent-card.json hits
@@ -111,7 +109,7 @@ well-knowns.com (x402 purchase → USDC to HClaw wallet)
 
 - [ ] **Landing page for human buyers** — well-knowns.com currently resolves to resolved.sh listing page. Consider a simple page that explains the data to human buyers (security researchers, OAuth devs) to expand addressable market.
 
-- [ ] **Track downloads and revenue** — Log resolved.sh download counts weekly. Set up HClaw wallet monitoring.
+- [ ] **Track downloads and revenue** — Log resolved.sh download counts weekly. Set up wallet monitoring.
 
 - [ ] **Expand domain sources** — After Tranco top 100k is stable: add domains from GitHub MCP server repos, npm MCP packages, A2A partner lists. Publish "Extended Catalog" at higher price point.
 

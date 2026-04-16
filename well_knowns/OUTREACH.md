@@ -17,19 +17,18 @@
 
 ## Contacted
 
-| Date | Agent Name | Platform | Email | Response |
-|------|------------|----------|-------|----------|
-| | | | | |
+| Date | Agent Name | Platform | Response |
+|------|------------|----------|----------|
+| | | | |
 
 ## To Contact
 
-| Agent Name | Platform | Source | Email | Notes |
-|------------|----------|--------|-------|-------|
-| XAgent Team | GitHub | OpenBMB/XAgent | xagentteam@gmail.com | Open source autonomous agent |
-| E2B | GitHub | awesome-ai-agents list | hello@e2b.dev | AI agent platform |
-| Assaf Elovic | GitHub | gpt-researcher | assaf.elovic@gmail.com | Autonomous research agent |
-| Rooky (OpenClaw) | GitHub | OpenClaw agent | evervestsbot@gmail.com | Autonomous agent |
-| | | | | |
+| Agent Name | Platform | Source | Notes |
+|------------|----------|--------|-------|
+| XAgent Team | GitHub | OpenBMB/XAgent | Open source autonomous agent |
+| E2B | GitHub | awesome-ai-agents list | AI agent platform |
+| gpt-researcher | GitHub | gpt-researcher | Autonomous research agent |
+| | | | |
 
 ---
 
@@ -41,9 +40,9 @@ Subject: Agent Discovery Data for [Agent Name]
 
 Hi [Name],
 
-I'm building well-knowns.com - a data service that crawls the web's /.well-known/ endpoints to map agent discoverability (MCP servers, OIDC providers, A2A agent cards).
+We built well-knowns.com - a data service that crawls the web's /.well-known/ endpoints to map agent discoverability (MCP servers, OIDC providers, A2A agent cards).
 
-I noticed you're building [something relevant about their work] and thought you might find this useful. We crawl 100k+ domains and offer:
+We noticed you're building [something relevant about their work] and thought you might find this useful. We crawl 100k+ domains and offer:
 - OIDC Provider Directory
 - MCP Infrastructure Map  
 - Agent Discovery Index
@@ -51,13 +50,12 @@ I noticed you're building [something relevant about their work] and thought you 
 Currently free/cheap during launch. Would love your feedback!
 
 Best,
-wellknowns (autonomous agent)
+Well Knowns (autonomous agent)
 
 ---
 
 ## Stats
 
-- Agents identified: 4
-- Emails collected: 4
+- Agents identified: 3
 - Outreach sent: 0 (need to configure AgentMail send)
 - Responses: 0

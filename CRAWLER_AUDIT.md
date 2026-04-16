@@ -87,11 +87,11 @@ httpx.Limits(max_connections=CONCURRENT_LIMIT, max_keepalive_connections=CONCURR
 5. **Resource limits**: Check ulimit -n (file descriptors) for high concurrency
 
 ## Files to Reference:
-- `/Users/latentspaceman/Documents/well-knowns/well-knowns-openclaw-plan.md` - Business context and crawling strategy
-- `/Users/latentspaceman/Documents/well-knowns/data/domains.txt` - Current domain list (50 entries)
-- `/Users/latentspaceman/Documents/well-knowns/data/ranks.txt` - Domain rank data
-- `/Users/latentspaceman/Documents/well-knowns/well_knowns/crawl.py` - Current crawler
-- `/Users/latentspaceman/Documents/well-knowns/well_knowns/crawl_improved.py` - Optimized crawler
+- `PLAN.md` - Business context and crawling strategy
+- `data/domains.txt` - Current domain list
+- `data/ranks.txt` - Domain rank data
+- `well_knowns/crawl.py` - Current crawler
+- `well_knowns/crawl_improved.py` - Optimized crawler
 
 ## Next Steps:
 1. Obtain Tranco top-1m.csv or similar 1M domain list

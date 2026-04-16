@@ -6,7 +6,7 @@ import os
 
 # Configuration
 SUBDOMAIN = "well-knowns"
-API_KEY = "aa_live_bF1VTeER52VXKn7mtZ4MvKbdUOHTPs9Qe_t89mqd4vc"
+API_KEY = os.environ.get("RESOLVED_API_KEY", "")
 
 def run_curl(url):
     """Run curl command and return output"""

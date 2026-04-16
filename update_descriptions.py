@@ -10,7 +10,7 @@ from pathlib import Path
 import json
 
 # Configuration
-API_KEY = "aa_live_bF1VTeER52VXKn7mtZ4MvKbdUOHTPs9Qe_t89mqd4vc"
+API_KEY = os.environ.get("RESOLVED_API_KEY", "")
 RESOURCE_ID = "ef9f56ad-11a4-43e7-9171-fd108d194ad8"
 BASE_URL = "https://resolved.sh"
 DATA_DIR = Path(__file__).parent / "data"

@@ -118,32 +118,24 @@ python3 pipeline.py --phase upload --api-key aa_live_...
 
 ## Cron Jobs
 
-Two jobs are configured via OpenClaw cron:
+Two scheduled jobs handle automated operation:
 
 | Job | Schedule | What it does |
 |-----|---------|--------------|
 | `well-knowns-daily` | 02:00 UTC | Daily crawl (Priority 1 only) + generate + upload |
 | `well-knowns-weekly` | Monday 04:00 UTC | Full 100k crawl + generate all + upload |
 
-Both run as **isolated agent sessions** (`sessionTarget: isolated`) and announce results to chat when done.
-
-**CRITICAL:** Cron jobs run as isolated agents that inherit the workspace but NOT the shell environment. The venv path must be explicit: `/Users/mclaw/Documents/mclaw/.venv/bin/python3`.
-
 ---
 
-## How MClaw Acts on This
+## Autonomous Operations
 
-MClaw (me) performs the following autonomously:
+The agent team performs the following autonomously:
 
-1. **Monitors cron job runs** — The cron delivery fires a message into main session when a scheduled pipeline completes. I report results and flag any failures.
-
-2. **Triggers ad-hoc runs** — If HClaw asks to "run the crawl" or "update the data," I fire off the appropriate pipeline phase in a background exec session and monitor until done.
-
-3. **Fixes pipeline issues** — When upload fails, crawl crashes, or data looks wrong, I diagnose and patch the scripts, then re-run.
-
-4. **Updates PLAN.md** — When a roadmap item is completed or a new issue is discovered, I update the plan file and MEMORY.md.
-
-5. **Reports periodically** — During heartbeats, I may note well-knowns status if there's something actionable (e.g., a cron run failed, a new product is ready).
+1. **Runs scheduled pipeline** — Daily and weekly crawl cycles execute automatically.
+2. **Triggers ad-hoc runs** — On-demand crawl and upload via `bash scripts/cycle.sh`.
+3. **Fixes pipeline issues** — Diagnoses and patches scripts when upload fails or data looks wrong.
+4. **Updates PLAN.md** — When a roadmap item is completed or a new issue is discovered.
+5. **Cross-business enrichment** — Buys from Double Agent and produces grouped datasets.
 
 ---
 
@@ -163,9 +155,8 @@ MClaw (me) performs the following autonomously:
 - Workaround: deduplicate locally after generate, then re-upload
 
 **Cron job didn't fire:**
-- Check OpenClaw cron status: `cron(action: "list")`
-- Check next run time in job state
-- Gateway must be running for cron to fire
+- Check scheduled task status
+- Verify pipeline environment is configured
 
 **Crawl interrupted:**
 - checkpoint at `state/crawl-state.json` allows resume
@@ -176,7 +167,7 @@ MClaw (me) performs the following autonomously:
 
 ## Key Files
 
-- **Plan/Roadmap:** `/Users/mclaw/Documents/mclaw/well_knowns/PLAN.md`
-- **Business plan:** `/Users/mclaw/Documents/mclaw/well-knowns-openclaw-plan.md`
-- **Pipeline logs:** `/Users/mclaw/Documents/mclaw/data/state/`
-- **Resolved.sh API key:** in `~/.openclaw/workspace/TOOLS.md`
+- **Plan/Roadmap:** `PLAN.md` (repo root)
+- **Pipeline plan:** `well_knowns/PLAN.md`
+- **Pipeline logs:** `data/state/`
+- **Resolved.sh API key:** in `.env` (gitignored)
