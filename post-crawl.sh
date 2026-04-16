@@ -17,11 +17,11 @@ fi
 
 echo "=== Step 1: Generate datasets ==="
 cd "$REPO_ROOT"
-python3 well_knowns/generate.py
+python3 well_knowns/generate_improved.py
 
 echo ""
 echo "=== Step 2: Upload to resolved.sh ==="
-RESOLVED_API_KEY="$API_KEY" python3 well_knowns/upload.py
+python3 well_knowns/upload.py --api-key "$API_KEY" --replace
 
 echo ""
 echo "=== Step 3: Patch descriptions on uploaded files ==="
@@ -77,6 +77,10 @@ patch_description "mcp-infrastructure-${DATE}.json" \
 patch_description "delta-${DATE}.jsonl" \
   "Daily change log of /.well-known/ endpoint changes across top 100k domains. Columns: domain, endpoint (e.g. agent-card.json), change_type (new/removed/updated), previous_status, current_status, crawled_at. Use cases: monitor when domains add/drop agent cards, track MCP server rollouts, detect OIDC endpoint changes. Updated daily." \
   0.01 0.05
+
+echo ""
+echo "=== Step 4: Cross-business enrichment (buy Double Agent data + produce grouped datasets) ==="
+python3 pipeline/enrich.py
 
 echo ""
 echo "=== Done! ==="

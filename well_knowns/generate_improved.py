@@ -297,6 +297,31 @@ def main():
     else:
         log.info("No previous crawl found — skipping delta")
 
+    # Full Catalog — all domains, all endpoints, one row per successful hit
+    full_catalog_path = DATA_DIR / f"full-catalog-{date}.jsonl"
+    full_catalog_count = 0
+    with full_catalog_path.open("w") as f:
+        for rec in records:
+            for endpoint, ep_data in rec.get("endpoints", {}).items():
+                if ep_data.get("status") == 200:
+                    row = {
+                        "domain": rec["domain"],
+                        "rank": rec.get("rank"),
+                        "endpoint": endpoint,
+                        "raw_content": ep_data.get("data"),
+                        "http_status": ep_data.get("status"),
+                        "crawled_at": rec["crawled_at"],
+                    }
+                    f.write(json.dumps(row) + "\n")
+                    full_catalog_count += 1
+    log.info("Full Catalog: %d rows → %s", full_catalog_count, full_catalog_path)
+    products["Full Catalog"] = {
+        "filename": full_catalog_path.name,
+        "price_usdc": "1.00",
+        "record_count": full_catalog_count,
+        "format": "JSONL",
+    }
+
     # Catalog Manifest (free)
     manifest      = generate_manifest(records, products)
     manifest_path = DATA_DIR / "catalog-manifest.json"

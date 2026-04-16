@@ -24,6 +24,7 @@ PRODUCT_PRICES = {
     "mcp-infrastructure-{date}.json":   "0.10",
     "full-catalog-{date}.jsonl":       "1.00",
     "delta-{date}.jsonl":              "0.01",
+    "full-catalog-{date}.jsonl":       "1.00",
     # catalog-manifest.json is published directly on the listing page for free
     # (not uploaded as a paid file)
 }
