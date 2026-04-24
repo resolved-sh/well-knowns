@@ -21,20 +21,43 @@ else
   echo "  RESOLVED_API_KEY:    MISSING"
 fi
 echo "  RESOLVED_RESOURCE_ID: ${RESOURCE_ID:-MISSING}"
-echo "  EVM_PRIVATE_KEY:     ${EVM_PRIVATE_KEY:+set}${EVM_PRIVATE_KEY:-MISSING}"
-echo "  EVM_PUBLIC_ADDRESS:  ${EVM_PUBLIC_ADDRESS:-MISSING}"
+if [ -n "$EVM_PRIVATE_KEY" ]; then
+  echo "  EVM_PRIVATE_KEY:     set"
+else
+  echo "  EVM_PRIVATE_KEY:     MISSING"
+fi
+if [ -n "$EVM_PUBLIC_ADDRESS" ]; then
+  echo "  EVM_PUBLIC_ADDRESS:  set"
+else
+  echo "  EVM_PUBLIC_ADDRESS:  MISSING"
+fi
 echo ""
 
 # Check registration
 echo "--- Registration ---"
 if [ -n "$API_KEY" ]; then
-  REG_RESPONSE=$(curl -sf "https://resolved.sh/listing/$RESOURCE_ID" \
+  DASH_RESPONSE=$(curl -sf "https://resolved.sh/dashboard" \
     -H "Authorization: Bearer $API_KEY" 2>/dev/null || echo "FAILED")
-  if [ "$REG_RESPONSE" != "FAILED" ]; then
-    echo "  Status: reachable"
-    echo "  Listing: https://well-knowns.resolved.sh"
+  if [ "$DASH_RESPONSE" != "FAILED" ]; then
+    echo "$DASH_RESPONSE" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+for r in d.get('resources', []):
+    if r['id'] == '$RESOURCE_ID':
+        print(f'  Subdomain:  {r[\"subdomain\"]}.resolved.sh')
+        print(f'  Display:    {r.get(\"display_name\", \"n/a\")}')
+        domains = r.get('custom_domains', [])
+        if domains:
+            print(f'  Domains:    {\", \".join(domains)}')
+        break
+for a in d.get('paid_actions', []):
+    if a.get('action_type') == 'registration' and a.get('resource_id') == '$RESOURCE_ID':
+        print(f'  Status:     {a[\"status\"]}')
+        print(f'  Expires:    {a[\"expires_at\"]}')
+        break
+" 2>/dev/null || echo "  Status: parse error"
   else
-    echo "  Status: UNREACHABLE (check API key and resource ID)"
+    echo "  Status: UNREACHABLE (check API key)"
   fi
 else
   echo "  Status: SKIPPED (no API key)"

@@ -14,6 +14,19 @@ This repo is also a **demonstration of resolved.sh** — showing how an autonomo
 - **Inbox:** jollylight927@agentmail.to
 - **Registration status:** active (paid)
 
+## Agent team
+
+This business is run by a 4-agent team. The **CEO** is the default entry point.
+
+| Agent | File | Role |
+|-------|------|------|
+| CEO | `.claude/agents/wellknowns-ceo.md` | Strategic leadership, prioritization, delegation |
+| Operator | `.claude/agents/wellknowns-operator.md` | Pipeline ops, uploads, health checks |
+| Analyst | `.claude/agents/wellknowns-analyst.md` | Data analysis, blog posts, trends |
+| Growth | `.claude/agents/wellknowns-growth.md` | Page optimization, distribution |
+
+Agent memory persists at `.claude/agent-memory/{agent-name}/`.
+
 ## Repo structure
 
 ```
@@ -22,7 +35,8 @@ pipeline/              # Cross-business enrichment (buys from Double Agent)
 data/                  # Generated datasets (mostly gitignored)
 distribution/          # External platform listings (HuggingFace, etc.)
 scripts/               # Operational scripts (cycle, maintain)
-.claude/agents/        # Sub-agent definitions for autonomous operation
+.claude/agents/        # Agent team definitions (CEO, operator, analyst, growth)
+.claude/agent-memory/  # Persistent memory per agent role
 ```
 
 ## How to operate
