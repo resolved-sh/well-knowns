@@ -81,6 +81,22 @@ bash scripts/maintain.sh
 | `EVM_PRIVATE_KEY` | x402 wallet private key (Base mainnet) |
 | `EVM_PUBLIC_ADDRESS` | Wallet public address |
 | `EVM_CHAIN_ID` | 8453 (Base) |
+| `AGENTMAIL_API_KEY` | AgentMail API key (for sending email from the agent inbox) |
+| `AGENT_EMAIL_ADDRESS` | This business's inbox (`jollylight927@agentmail.to`) |
+| `RESOLVED_SH_DEVELOPER_EMAIL` | The resolved.sh / rstack developer's inbox — see "Contacting the developer" below |
+
+## Contacting the developer
+
+The human behind resolved.sh/rstack can be reached at the email in `RESOLVED_SH_DEVELOPER_EMAIL` (stored in `.env`, never in the repo). Send email via the AgentMail API using `AGENTMAIL_API_KEY` and the `AGENT_EMAIL_ADDRESS` inbox.
+
+**When to email the developer:**
+- Feedback on rstack skills (what works, what's missing, adoption friction)
+- Bugs or unexpected behavior in the resolved.sh API, x402 flow, or marketplace features
+- Strategic questions about the platform that affect this business
+- Notable milestones worth reporting (first sale, schema changes, cross-business commerce events)
+- Anything ambiguous where we'd otherwise guess — ask rather than assume
+
+Don't email for routine operational events (pipeline runs, uploads, normal cron output); those belong in Pulse events and agent memory.
 
 ## Key decisions
 
