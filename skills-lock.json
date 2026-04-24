@@ -1,0 +1,60 @@
+{
+  "version": 1,
+  "skills": {
+    "agentmail": {
+      "source": "agentmail-to/agentmail-skills",
+      "sourceType": "github",
+      "computedHash": "c4056c9eaf5c01ed9aebdca1abe5926b08695bb71cb8ad0128b29af3c6530f3d"
+    },
+    "rstack": {
+      "source": "resolved-sh/rstack",
+      "sourceType": "github",
+      "computedHash": "e8216548ef9bccc39bcbd80b58cd04a36566e0cf8a9f2c1b2039ae26addeaa09"
+    },
+    "rstack-audit": {
+      "source": "resolved-sh/rstack",
+      "sourceType": "github",
+      "computedHash": "b42f0c66ae3f404b518400e0660da706a30a8877175fca8a8e343773c38c6026"
+    },
+    "rstack-bootstrap": {
+      "source": "resolved-sh/rstack",
+      "sourceType": "github",
+      "computedHash": "7f5b2c733ff7010e376d4a12467e5c21605f57e66823006ecac9bb5935358891"
+    },
+    "rstack-content": {
+      "source": "resolved-sh/rstack",
+      "sourceType": "github",
+      "computedHash": "1288acc03b366cd6b5caf6358192a697cc5ed5c6a58895510e921bf083f0a567"
+    },
+    "rstack-data": {
+      "source": "resolved-sh/rstack",
+      "sourceType": "github",
+      "computedHash": "64085df3d73614dbceb8df87a006ea534520bff0349e32692d2217bb18cf1b74"
+    },
+    "rstack-distribute": {
+      "source": "resolved-sh/rstack",
+      "sourceType": "github",
+      "computedHash": "c42d6c2738a92ae852c6b6a6ee3584fadbf992b6be94590ef57d0c004f1965e8"
+    },
+    "rstack-ideate": {
+      "source": "resolved-sh/rstack",
+      "sourceType": "github",
+      "computedHash": "cab48e335e4fbbcb0bc2f15ca658537dc9d68a3e7d972955a91741b2f9e23208"
+    },
+    "rstack-page": {
+      "source": "resolved-sh/rstack",
+      "sourceType": "github",
+      "computedHash": "bdc565095bf33b3428723ac0bfb248344e43411470ea406c0a1be957e642ee41"
+    },
+    "rstack-services": {
+      "source": "resolved-sh/rstack",
+      "sourceType": "github",
+      "computedHash": "14a3cd916255586f253ab75b89cef5c342ae1eb52bfc5accff39eab8bcb0bf6a"
+    },
+    "rstack-team": {
+      "source": "resolved-sh/rstack",
+      "sourceType": "github",
+      "computedHash": "a1b7bca517f17731be5b8e63287456496027d77e7d884aa60c36ce98d21a6d5c"
+    }
+  }
+}
