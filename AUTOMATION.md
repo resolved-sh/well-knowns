@@ -114,11 +114,12 @@ Each business adds value the other cannot produce alone:
 - DA weekly blog digest (scheduled, Mon 10am)
 - WK → DA purchase: `pipeline/enrich.py` buys DA's x402 index
 - WK crawl pipeline: `bash scripts/cycle.sh`
+- WK Pulse event emission on weekly crawl completion (`post-crawl.sh` Step 5)
 
 ### 🔲 Still needed
 - WK scheduled tasks in Claude Desktop (weekly crawl, upload, enrichment)
 - DA → WK purchase: `pipeline/enrich_with_wellknowns.py` (buys WK's x402-filtered dataset)
-- Pulse events for both businesses on data publish
+- DA Pulse event emission on data publish (research post, blog digest, index updates)
 - WK dataset specifically sized for DA purchase: `x402-companies-full-infra-{date}.jsonl`
 - Test the full loop end-to-end
 

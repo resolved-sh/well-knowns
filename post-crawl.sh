@@ -88,5 +88,17 @@ echo "=== Step 4: Cross-business enrichment (buy Double Agent data + produce gro
 python3 pipeline/enrich.py
 
 echo ""
+echo "=== Step 5: Emit Pulse event ==="
+PULSE_RESP=$(curl -s -X POST "https://resolved.sh/well-knowns/events" \
+  -H "Authorization: Bearer $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d "{\"event_type\": \"task_completed\", \"payload\": {\"task_type\": \"weekly_crawl\", \"duration_seconds\": $SECONDS, \"success\": true}, \"is_public\": true}")
+if echo "$PULSE_RESP" | grep -q '"event_id"'; then
+  echo "  OK Pulse event emitted (weekly_crawl, ${SECONDS}s)"
+else
+  echo "  FAIL Pulse event: $(echo "$PULSE_RESP" | head -c 300)"
+fi
+
+echo ""
 echo "=== Done! ==="
 echo "Fresh data from $(date +%Y-%m-%d) 100k-domain crawl is now live on resolved.sh"
