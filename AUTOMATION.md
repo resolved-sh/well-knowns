@@ -95,7 +95,7 @@ Each business adds value the other cannot produce alone:
 - Both businesses pay each other at published prices — no special rates
 - Payments use x402 USDC on Base Mainnet, settled directly to each business's EVM wallet
 
-### Weekly schedule
+### Schedule
 
 | Time | Business | Task |
 |------|----------|------|
@@ -104,6 +104,7 @@ Each business adds value the other cannot produce alone:
 | Mon 9am | Double Agent | Publish weekly deep-research post |
 | Mon 10am | Double Agent | Publish weekly blog digest |
 | Tue | Double Agent | Buy WK enriched dataset, update company profiles |
+| 8am, 2pm, 8pm daily | Well Knowns | Delta cycle — diff crawl state, publish new signals, conditional DA buy (`wk-delta-cycle`) |
 
 ---
 
@@ -115,10 +116,15 @@ Each business adds value the other cannot produce alone:
 - WK → DA purchase: `pipeline/enrich.py` buys DA's x402 index
 - WK crawl pipeline: `bash scripts/cycle.sh`
 - WK Pulse event emission on weekly crawl completion (`post-crawl.sh` Step 5)
+- WK delta cycle (3×/day): `scripts/daily_signals.py` diffs crawl state, `scripts/publish_signals.py` uploads `x402-daily-signals.jsonl` ($0.10 query · $0.50 download) and emits a Pulse event
+- WK conditional DA purchase: `pipeline/enrich.py` skips x402 re-buys when DA's listing signature is unchanged (cache index at `pipeline/cache/da_last_purchased.json`)
+- WK scheduled task: `~/Documents/Claude/Scheduled/wk-delta-cycle/SKILL.md` runs the delta cycle 3×/day
+- WK forward-compatible buy of DA's `x402_new_activity_feed.jsonl` delta feed (no-op until DA publishes one)
 
 ### 🔲 Still needed
-- WK scheduled tasks in Claude Desktop (weekly crawl, upload, enrichment)
-- DA → WK purchase: `pipeline/enrich_with_wellknowns.py` (buys WK's x402-filtered dataset)
+- WK scheduled tasks in Claude Desktop for weekly crawl + upload (the delta cycle is scheduled; the weekly cycle still needs registration)
+- DA → WK purchase: `pipeline/enrich_with_wellknowns.py` (buys WK's x402-filtered dataset, including the new daily signals feed)
+- DA delta listing: `x402_new_activity_feed.jsonl` published by DA at ~$0.50 to balance the loop
 - DA Pulse event emission on data publish (research post, blog digest, index updates)
 - WK dataset specifically sized for DA purchase: `x402-companies-full-infra-{date}.jsonl`
 - Test the full loop end-to-end

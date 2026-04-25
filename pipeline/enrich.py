@@ -51,8 +51,14 @@ EVM_PRIVATE_KEY  = os.environ.get("EVM_PRIVATE_KEY", "")
 EVM_PUBLIC_ADDR  = os.environ.get("EVM_PUBLIC_ADDRESS", "")
 
 # Double Agent — source of x402 ecosystem company data
-DOUBLE_AGENT_BASE = "https://agentagent.resolved.sh"
-DOUBLE_AGENT_FILE = "x402_ecosystem_full_index.jsonl"  # full company index, $2.00
+DOUBLE_AGENT_BASE      = "https://agentagent.resolved.sh"
+DOUBLE_AGENT_SUBDOMAIN = "agentagent"  # public listing JSON at resolved.sh/{subdomain}
+DOUBLE_AGENT_FILE      = "x402_ecosystem_full_index.jsonl"  # full company index, $2.00
+DA_DELTA_FILE          = "x402_new_activity_feed.jsonl"  # forward-compatible delta feed (~$0.50)
+
+# Metadata-aware cache for Double Agent purchases
+CACHE_DIR   = REPO_ROOT / "pipeline" / "cache"
+CACHE_INDEX = CACHE_DIR / "da_last_purchased.json"
 
 # USDC on Base Mainnet
 USDC_CONTRACT = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"
@@ -144,41 +150,15 @@ def check_usdc_balance(wallet_addr: str) -> float:
         return -1.0
 
 
-def x402_download(url: str, cache_path: Path) -> list[dict]:
+def x402_download(url: str, save_path: Path) -> list[dict]:
     """
-    Download a file via x402 payment. Returns list of parsed JSONL records.
-    Uses cache_path if already downloaded today.
+    Purchase a file via x402 payment, save to save_path, return parsed JSONL records.
+    Always performs a real purchase — caching decisions are made by the caller
+    (see fetch_or_load).
     """
-    if cache_path.exists():
-        log.info("Using cached file: %s", cache_path)
-        records = []
-        with cache_path.open() as f:
-            for line in f:
-                line = line.strip()
-                if line:
-                    try:
-                        records.append(json.loads(line))
-                    except json.JSONDecodeError:
-                        pass
-        log.info("Loaded %d records from cache", len(records))
-        return records
-
     if not EVM_PRIVATE_KEY or not EVM_PUBLIC_ADDR:
         log.error("EVM_PRIVATE_KEY and EVM_PUBLIC_ADDRESS are required for x402 payments")
         sys.exit(1)
-
-    # Check balance before attempting payment
-    balance = check_usdc_balance(EVM_PUBLIC_ADDR)
-    if balance >= 0:
-        log.info("Wallet USDC balance: $%.4f", balance)
-        if balance < 2.05:  # rough threshold covering the $2.00 full index + small buffer
-            log.error(
-                "Insufficient USDC balance: $%.4f in %s. "
-                "Need at least ~$2.10 to purchase Double Agent full index ($2.00). "
-                "Fund the wallet with USDC on Base and retry.",
-                balance, EVM_PUBLIC_ADDR
-            )
-            sys.exit(1)
 
     log.info("Attempting x402 purchase: %s", url)
     with httpx.Client(timeout=30.0) as client:
@@ -188,15 +168,25 @@ def x402_download(url: str, cache_path: Path) -> list[dict]:
             log.error("Expected 402, got %d: %s", r.status_code, r.text[:200])
             sys.exit(1)
 
-        payment_req = r.json()
-        accepts = payment_req.get("accepts", [])
+        accepts = r.json().get("accepts", [])
         if not accepts:
-            log.error("No accepts in 402 response: %s", payment_req)
+            log.error("No accepts in 402 response")
             sys.exit(1)
 
-        accept = accepts[0]
+        accept      = accepts[0]
         amount_usdc = int(accept["amount"]) / 1_000_000
-        log.info("Payment required: $%.2f USDC to %s", amount_usdc, accept["payTo"])
+        log.info("Payment required: $%.4f USDC to %s", amount_usdc, accept["payTo"])
+
+        # Balance check sized to the actual amount required (+ small buffer)
+        balance = check_usdc_balance(EVM_PUBLIC_ADDR)
+        if balance >= 0:
+            log.info("Wallet USDC balance: $%.4f", balance)
+            if balance < amount_usdc + 0.05:
+                log.error(
+                    "Insufficient USDC balance: $%.4f in %s. Need ~$%.4f for this purchase.",
+                    balance, EVM_PUBLIC_ADDR, amount_usdc + 0.05,
+                )
+                sys.exit(1)
 
         # Step 2: sign and pay
         proof_b64 = sign_x402_payment(accept)
@@ -208,21 +198,121 @@ def x402_download(url: str, cache_path: Path) -> list[dict]:
             sys.exit(1)
 
         log.info("Payment accepted! Downloaded %d bytes", len(r2.content))
+        save_path.parent.mkdir(parents=True, exist_ok=True)
+        save_path.write_bytes(r2.content)
+        log.info("Saved to %s", save_path)
 
-        # Save to cache
-        cache_path.write_bytes(r2.content)
-        log.info("Saved to %s", cache_path)
-
-        records = []
-        for line in r2.text.splitlines():
-            line = line.strip()
-            if line:
-                try:
-                    records.append(json.loads(line))
-                except json.JSONDecodeError:
-                    pass
+        records = _parse_jsonl_text(r2.text)
         log.info("Parsed %d records", len(records))
         return records
+
+
+# ── DA listing metadata + cache ───────────────────────────────────────────────
+
+def _parse_jsonl_text(text: str) -> list[dict]:
+    records = []
+    for line in text.splitlines():
+        line = line.strip()
+        if line:
+            try:
+                records.append(json.loads(line))
+            except json.JSONDecodeError:
+                pass
+    return records
+
+
+def _read_jsonl(path: Path) -> list[dict]:
+    if not path.exists():
+        return []
+    return _parse_jsonl_text(path.read_text())
+
+
+def fetch_da_listing_metadata() -> dict:
+    """
+    Fetch DA's public listing JSON (no auth required). Returns
+    {filename: file_meta} for each file in DA's data marketplace.
+    Returns {} on failure.
+    """
+    url = f"{RESOLVED_BASE}/{DOUBLE_AGENT_SUBDOMAIN}"
+    try:
+        r = httpx.get(url, headers={"Accept": "application/json"}, timeout=10.0)
+        r.raise_for_status()
+        files = r.json().get("data_marketplace", {}).get("files", []) or []
+        return {f["filename"]: f for f in files if f.get("filename")}
+    except Exception as e:
+        log.warning("Could not fetch DA listing metadata from %s: %s", url, e)
+        return {}
+
+
+def remote_signature(file_meta: dict) -> dict:
+    """
+    Signature that changes when DA's file content changes. `updated_at` is
+    preferred; the public listing JSON currently exposes only size_bytes
+    (updated_at is forward-compatible — captured if/when DA exposes it).
+    """
+    return {
+        "size_bytes": file_meta.get("size_bytes"),
+        "updated_at": file_meta.get("updated_at"),
+    }
+
+
+def load_cache_index() -> dict:
+    if not CACHE_INDEX.exists():
+        return {}
+    try:
+        return json.loads(CACHE_INDEX.read_text())
+    except json.JSONDecodeError:
+        return {}
+
+
+def save_cache_index(index: dict):
+    CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    CACHE_INDEX.write_text(json.dumps(index, indent=2))
+
+
+def fetch_or_load(filename: str, da_meta: dict, cache_index: dict,
+                  *, required: bool = False) -> tuple[list[dict], bool]:
+    """
+    Get records for a DA file using the metadata-aware cache. Returns
+    (records, was_purchased). Skips the x402 purchase when the remote
+    signature matches the cached signature.
+
+    If the file isn't present in DA's listing and required=False, returns
+    ([], False) — the caller decides what to do.
+    """
+    file_meta = da_meta.get(filename)
+    if not file_meta:
+        if required:
+            log.error("Required file %s not found on Double Agent", filename)
+            sys.exit(1)
+        log.info("Skipping %s — not present on Double Agent", filename)
+        return [], False
+
+    cache_path = CACHE_DIR / filename
+    sig        = remote_signature(file_meta)
+    cached_sig = cache_index.get(filename, {}).get("signature")
+
+    if cache_path.exists() and cached_sig == sig:
+        log.info("Cache hit for %s (size_bytes=%s)", filename, sig.get("size_bytes"))
+        return _read_jsonl(cache_path), False
+
+    if cached_sig:
+        log.info("Cache miss for %s — DA signature changed (cached=%s remote=%s)",
+                 filename, cached_sig, sig)
+    else:
+        log.info("First purchase for %s", filename)
+
+    download_url = f"{DOUBLE_AGENT_BASE}/data/{filename}"
+    records = x402_download(download_url, cache_path)
+
+    cache_index[filename] = {
+        "signature":    sig,
+        "purchased_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "cache_path":   str(cache_path.relative_to(REPO_ROOT)),
+        "record_count": len(records),
+    }
+    save_cache_index(cache_index)
+    return records, True
 
 
 # ── Domain normalization ──────────────────────────────────────────────────────
@@ -435,15 +525,32 @@ def main():
         log.error("RESOLVED_API_KEY not set")
         sys.exit(1)
 
-    # ── Step 1: Download Double Agent company data ────────────────────────────
-    cache_path = DATA_DIR / f"double-agent-companies-{date}.jsonl"
-    download_url = f"{DOUBLE_AGENT_BASE}/data/{DOUBLE_AGENT_FILE}"
-    log.info("=== Purchasing Double Agent company data ===")
-    company_records = x402_download(download_url, cache_path)
+    # ── Step 1: Acquire DA data (cache-aware) ────────────────────────────────
+    log.info("=== Fetching Double Agent listing metadata ===")
+    da_meta = fetch_da_listing_metadata()
+    log.info("DA exposes %d files", len(da_meta))
+
+    cache_index = load_cache_index()
+
+    log.info("=== Acquiring Double Agent company index ===")
+    company_records, purchased_index = fetch_or_load(
+        DOUBLE_AGENT_FILE, da_meta, cache_index, required=True,
+    )
+    log.info("Company records: %d (purchased=%s)", len(company_records), purchased_index)
 
     if not company_records:
         log.error("No company data received from Double Agent")
         sys.exit(1)
+
+    # Step 1b: optional delta feed — skipped silently if DA hasn't published one yet
+    log.info("=== Checking for DA delta feed (%s) ===", DA_DELTA_FILE)
+    delta_records, purchased_delta = fetch_or_load(
+        DA_DELTA_FILE, da_meta, cache_index, required=False,
+    )
+    if delta_records:
+        log.info("DA delta feed: %d records (purchased=%s) — merging into company index",
+                 len(delta_records), purchased_delta)
+        company_records.extend(delta_records)
 
     # Log available fields for debugging
     if company_records:
@@ -527,7 +634,7 @@ def main():
     log.info("Agent Cards:       %d records", len(agent_cards))
     log.info("MCP Infrastructure:%d records", len(mcp_infra))
     log.info("WK Overview:       %d rows",    len(overview))
-    log.info("Double Agent data cached at: %s", cache_path)
+    log.info("Double Agent cache index: %s", CACHE_INDEX)
 
 
 if __name__ == "__main__":
