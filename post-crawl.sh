@@ -51,15 +51,20 @@ for f in d.get('files', []):
     return
   fi
 
-  curl -s -X PATCH "https://resolved.sh/listing/$RESOURCE_ID/data/$FILE_ID" \
+  RESP=$(curl -s -X PATCH "https://resolved.sh/listing/$RESOURCE_ID/data/$FILE_ID" \
     -H "Authorization: Bearer $API_KEY" \
     -H "Content-Type: application/json" \
-    -d "{\"description\": \"$DESCRIPTION\", \"query_price_usdc\": $QUERY_PRICE, \"download_price_usdc\": $DOWNLOAD_PRICE}" \
-    > /dev/null && echo "  ✅ $FILENAME"
+    -d "{\"description\": \"$DESCRIPTION\", \"query_price_usdc\": $QUERY_PRICE, \"download_price_usdc\": $DOWNLOAD_PRICE}")
+  if echo "$RESP" | grep -q '"detail"'; then
+    echo "  FAIL $FILENAME: $RESP" | head -c 300
+    echo ""
+  else
+    echo "  OK $FILENAME"
+  fi
 }
 
 patch_description "full-catalog-${DATE}.jsonl" \
-  "Complete /.well-known/ endpoint catalog across the Tranco top 100k domains. All 7 endpoint types: agent-card.json, mcp.json, oauth-protected-resource, openid-configuration, oauth-authorization-server, security.txt, host-meta. One row per (domain, endpoint) hit. Key columns: domain, rank, endpoint, raw_content (parsed JSON or text), http_status, crawled_at. Use cases: internet-wide agent infrastructure research, competitive analysis, security auditing. Source: Tranco top 100k crawl. Updated weekly." \
+  "Complete /.well-known/ catalog across the Tranco top 100k domains. Seven endpoint types: agent-card.json, mcp.json, oauth-protected-resource, openid-configuration, oauth-authorization-server, security.txt, host-meta. One row per (domain, endpoint) hit. Columns: domain, rank, endpoint, raw_content, http_status, crawled_at. Use cases: agent infra research, security auditing, OAuth landscape mapping. Updated weekly." \
   0.10 1.00
 
 patch_description "oidc-providers-${DATE}.json" \

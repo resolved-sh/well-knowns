@@ -1,0 +1,4 @@
+- [2026-04-25 session](session_2026-04-25.md) — Re-read llms.txt baseline, kicked off weekly cycle, fixed 500-char description bug
+- [Pulse event API shape](reference_pulse_api.md) — Correct path is POST /{subdomain}/events with constrained event_type enum
+- [Description char limit](feedback_desc_500_limit.md) — resolved.sh file descriptions are capped at 500 chars; post-crawl.sh had silent failures
+- [Listing data endpoint](reference_listing_data_api.md) — Use /listing/{id}/data not /api/v1/resources/{id}/files
