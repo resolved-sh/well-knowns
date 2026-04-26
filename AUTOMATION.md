@@ -117,9 +117,9 @@ Each business adds value the other cannot produce alone:
 - WK crawl pipeline: `bash scripts/cycle.sh`
 - WK Pulse event emission on weekly crawl completion (`post-crawl.sh` Step 5)
 - WK delta cycle (3×/day): `scripts/daily_signals.py` diffs crawl state, `scripts/publish_signals.py` uploads `x402-daily-signals.jsonl` ($0.10 query · $0.50 download) and emits a Pulse event
-- WK conditional DA purchase: `pipeline/enrich.py` skips x402 re-buys when DA's listing signature is unchanged (cache index at `pipeline/cache/da_last_purchased.json`)
+- WK conditional DA purchase: `pipeline/enrich.py` purchases each DA dataset at most once per UTC day (cache index at `pipeline/cache/da_last_purchased.json` — `{filename: "YYYY-MM-DD"}`)
 - WK scheduled task: `~/Documents/Claude/Scheduled/wk-delta-cycle/SKILL.md` runs the delta cycle 3×/day
-- WK forward-compatible buy of DA's `x402_new_activity_feed.jsonl` delta feed (no-op until DA publishes one)
+- WK opportunistic buy of DA's `x402_new_activity_feed.jsonl` delta feed (probes daily; 404 → skip silently until DA publishes one)
 
 ### 🔲 Still needed
 - WK scheduled tasks in Claude Desktop for weekly crawl + upload (the delta cycle is scheduled; the weekly cycle still needs registration)
