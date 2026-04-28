@@ -5,16 +5,23 @@ scripts/daily_signals.py
 Diff the latest WK crawl output against the previously-published signal state
 and write a delta of new/changed/removed `.well-known/` endpoint hits.
 
-Reads:  data/raw-crawl.jsonl          — latest crawl (streamed, large)
-Reads:  data/signals_checkpoint.json  — previously-published state (may be absent)
-Writes: data/signals_delta.jsonl      — delta records (overwritten each run)
-Writes: data/signals_checkpoint.json  — updated checkpoint
+Reads:  data/raw-crawl.jsonl                 — latest crawl (streamed, large)
+Reads:  data/signals_checkpoint.json         — last *committed* state (may be absent)
+Writes: data/signals_delta.jsonl             — delta records (overwritten each run)
+Writes: data/signals_checkpoint_pending.json — *proposed* next state
+
+The pending file is promoted to the canonical checkpoint by publish_signals.py
+only after a successful publish (or after a confirmed empty-delta no-op). If
+publish fails, the canonical checkpoint does not advance and the next
+daily_signals.py run will re-detect the same deltas plus any newer ones —
+nothing is silently dropped.
 
 A signal is fingerprinted as `{domain}:{endpoint}` → 12-char SHA-256 of the
 endpoint's `data` field. Only successful (status=200) endpoint hits count.
 
-The first run on an existing crawl bootstraps the checkpoint and emits an
-empty delta — that crawl state becomes the baseline for future diffs.
+The first run on an existing crawl bootstraps the pending checkpoint and emits
+an empty delta — publish_signals.py promotes it on the next run, and that
+state becomes the baseline for future diffs.
 
 Delta record schema (one row per change):
   {
@@ -37,11 +44,12 @@ from pathlib import Path
 
 import httpx
 
-REPO_ROOT  = Path(__file__).parent.parent
-DATA_DIR   = REPO_ROOT / "data"
-CRAWL_PATH = DATA_DIR / "raw-crawl.jsonl"
-CHECKPOINT = DATA_DIR / "signals_checkpoint.json"
-DELTA_PATH = DATA_DIR / "signals_delta.jsonl"
+REPO_ROOT          = Path(__file__).parent.parent
+DATA_DIR           = REPO_ROOT / "data"
+CRAWL_PATH         = DATA_DIR / "raw-crawl.jsonl"
+CHECKPOINT         = DATA_DIR / "signals_checkpoint.json"          # canonical (read-only here)
+CHECKPOINT_PENDING = DATA_DIR / "signals_checkpoint_pending.json"  # written here, promoted by publish
+DELTA_PATH         = DATA_DIR / "signals_delta.jsonl"
 
 RESOLVED_BASE = "https://resolved.sh"
 WK_SUBDOMAIN  = "well-knowns"
@@ -147,8 +155,12 @@ def load_checkpoint():
         return None
 
 
-def write_checkpoint(current_state: dict, detected_at: str):
-    CHECKPOINT.write_text(json.dumps({
+def write_pending_checkpoint(current_state: dict, detected_at: str):
+    """
+    Write the *proposed* next checkpoint to a side file. publish_signals.py
+    atomically promotes it to the canonical path on successful publish.
+    """
+    CHECKPOINT_PENDING.write_text(json.dumps({
         "last_published_at": detected_at,
         "signal_count":      len(current_state),
         "signatures":        {k: v["signature"] for k, v in current_state.items()},
@@ -171,8 +183,8 @@ def main():
     checkpoint = load_checkpoint()
     if checkpoint is None:
         DELTA_PATH.write_text("")
-        write_checkpoint(current, detected_at)
-        print(f"Bootstrapped checkpoint with {len(current)} signals — empty delta written")
+        write_pending_checkpoint(current, detected_at)
+        print(f"Bootstrapped pending checkpoint with {len(current)} signals — empty delta written")
         emit_monitor_event(signals_checked=len(current), new_signals=0)
         return
 
@@ -218,7 +230,7 @@ def main():
         for d in deltas:
             f.write(json.dumps(d) + "\n")
 
-    write_checkpoint(current, detected_at)
+    write_pending_checkpoint(current, detected_at)
 
     counts = {"new": 0, "changed": 0, "removed": 0}
     for d in deltas:

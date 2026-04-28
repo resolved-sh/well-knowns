@@ -6,10 +6,18 @@ Upload data/signals_delta.jsonl to resolved.sh as the WK delta feed and emit a
 Pulse event. No-op (exit 0) when the delta file is empty.
 
 Reads:  data/signals_delta.jsonl
-Writes: data/signals_listing_id.txt   — file_id of the uploaded delta dataset
+Reads:  data/signals_checkpoint_pending.json  — proposed checkpoint from daily_signals.py
+Writes: data/signals_checkpoint.json          — promoted on successful publish (or empty no-op)
+Writes: data/signals_listing_id.txt           — file_id of the uploaded delta dataset
 
 Filename uploaded: x402-daily-signals.jsonl  (stable — replaces prior version on each run)
 Pricing: $0.10/query · $0.50/download
+
+Checkpoint promotion: daily_signals.py writes a *pending* checkpoint; this
+script atomically promotes it to canonical via Path.replace only after a
+successful publish (or on a confirmed empty-delta no-op). If publish fails,
+the canonical checkpoint stays put and the next run re-detects the same
+deltas plus any newer ones — no data is silently lost.
 
 Env:
   RESOLVED_API_KEY      — WK's resolved.sh API key (required; NOT RESOLVED_SH_API_KEY)
@@ -22,10 +30,12 @@ from pathlib import Path
 
 import httpx
 
-REPO_ROOT       = Path(__file__).parent.parent
-DATA_DIR        = REPO_ROOT / "data"
-DELTA_PATH      = DATA_DIR / "signals_delta.jsonl"
-LISTING_ID_FILE = DATA_DIR / "signals_listing_id.txt"
+REPO_ROOT          = Path(__file__).parent.parent
+DATA_DIR           = REPO_ROOT / "data"
+DELTA_PATH         = DATA_DIR / "signals_delta.jsonl"
+LISTING_ID_FILE    = DATA_DIR / "signals_listing_id.txt"
+CHECKPOINT         = DATA_DIR / "signals_checkpoint.json"
+CHECKPOINT_PENDING = DATA_DIR / "signals_checkpoint_pending.json"
 
 RESOLVED_BASE  = "https://resolved.sh"
 WK_SUBDOMAIN   = "well-knowns"
@@ -52,6 +62,17 @@ def load_dotenv(env_path: Path):
             os.environ.setdefault(k, v)
 
 
+def promote_pending_checkpoint():
+    """
+    Atomically promote the pending checkpoint to canonical via os-level rename.
+    No-op if no pending file is present (e.g. publish_signals.py invoked
+    without a prior daily_signals.py run).
+    """
+    if CHECKPOINT_PENDING.exists():
+        CHECKPOINT_PENDING.replace(CHECKPOINT)
+        print("  Promoted pending checkpoint → canonical")
+
+
 def main():
     load_dotenv(REPO_ROOT / ".env")
 
@@ -67,12 +88,14 @@ def main():
 
     if not DELTA_PATH.exists() or DELTA_PATH.stat().st_size == 0:
         print("No new signals, skipping")
+        promote_pending_checkpoint()
         return
 
     body = DELTA_PATH.read_bytes()
     row_count = sum(1 for line in body.splitlines() if line.strip())
     if row_count == 0:
         print("No new signals, skipping")
+        promote_pending_checkpoint()
         return
 
     print(f"Uploading {row_count} delta records ({len(body)} bytes) → {DELTA_FILENAME}")
@@ -134,6 +157,9 @@ def main():
             print(f"  Pulse event emitted: data_upload → {event_id}")
         else:
             print(f"WARN: Pulse emit failed {event.status_code} {event.text[:200]}")
+
+    # Upload (and patch) succeeded — Pulse failure is a warning, not a publish failure.
+    promote_pending_checkpoint()
 
 
 if __name__ == "__main__":

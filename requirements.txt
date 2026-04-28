@@ -1,0 +1,17 @@
+# Well Knowns — Python runtime dependencies.
+# Used by: scripts/daily_signals.py, scripts/publish_signals.py,
+# pipeline/enrich.py, well_knowns/upload.py, well_knowns/crawl_improved.py,
+# well_knowns/generate_improved.py, well_knowns/fetch_domains.py.
+#
+# Install:  python3 -m pip install -r requirements.txt
+
+# HTTP client used by every script that talks to resolved.sh / Double Agent.
+httpx>=0.27,<1.0
+
+# x402 payment signing (EIP-712 / EIP-3009 TransferWithAuthorization) in pipeline/enrich.py.
+# PyPI distribution name is `eth-account`; imports as `eth_account`.
+eth-account>=0.13,<1.0
+
+# Reserved for upcoming consolidation of the inline .env loaders in
+# publish_signals.py / enrich.py / daily_signals.py. Not yet imported.
+python-dotenv>=1.0,<2.0
