@@ -63,10 +63,15 @@ DOUBLE_AGENT_BASE = "https://agentagent.resolved.sh"
 DOUBLE_AGENT_FILE = "x402_ecosystem_full_index.jsonl"  # full company index, $2.00
 DA_DELTA_FILE     = "x402_new_activity_feed.jsonl"     # optional delta feed (~$0.50)
 
-# Daily-max-one-purchase cache for Double Agent.
-# Index format: {"<filename>": "YYYY-MM-DD"} — date of last purchase per dataset.
+# Hourly-max-one-purchase cache for Double Agent.
+# Index format: {"<filename>": "YYYY-MM-DDTHH"} — UTC hour of last purchase per dataset.
+# Pre-existing entries in YYYY-MM-DD form will not match a YYYY-MM-DDTHH key
+# and will be invalidated on first run after this change (forcing a fresh buy).
 CACHE_DIR   = REPO_ROOT / "pipeline" / "cache"
 CACHE_INDEX = CACHE_DIR / "da_last_purchased.json"
+
+# resolved.sh subdomain for emitting Pulse events (used by emit_sync_event).
+WK_SUBDOMAIN = "well-knowns"
 
 # Stable upload filenames — re-PUT each run is an atomic upsert.
 X402_AGENT_CARDS_UPLOAD = "x402-agent-cards-latest.jsonl"
@@ -165,12 +170,12 @@ def check_usdc_balance(wallet_addr: str) -> float:
 
 def x402_download(url: str, save_path: Path, *, allow_missing: bool = False):
     """
-    Purchase a file via x402 payment, save to save_path, return parsed JSONL records.
-    Always performs a real purchase — caching decisions are made by the caller
-    (see fetch_or_load).
+    Purchase a file via x402 payment, save to save_path, return
+    (records, amount_usdc). Always performs a real purchase — caching
+    decisions are made by the caller (see fetch_or_load).
 
-    When allow_missing=True, a 404 from the probe returns None instead of
-    exiting (used for optional files that DA may not publish).
+    When allow_missing=True, a 404 from the probe returns (None, 0.0) instead
+    of exiting (used for optional files that DA may not publish).
     """
     if not EVM_PRIVATE_KEY or not EVM_PUBLIC_ADDR:
         log.error("EVM_PRIVATE_KEY and EVM_PUBLIC_ADDRESS are required for x402 payments")
@@ -182,7 +187,7 @@ def x402_download(url: str, save_path: Path, *, allow_missing: bool = False):
         r = client.get(url)
         if r.status_code == 404 and allow_missing:
             log.info("File not available at %s (404) — skipping", url)
-            return None
+            return None, 0.0
         if r.status_code != 402:
             log.error("Expected 402, got %d: %s", r.status_code, r.text[:200])
             sys.exit(1)
@@ -223,10 +228,47 @@ def x402_download(url: str, save_path: Path, *, allow_missing: bool = False):
 
         records = _parse_jsonl_text(r2.text)
         log.info("Parsed %d records", len(records))
-        return records
+        return records, amount_usdc
 
 
-# ── Daily-max-one-purchase cache ──────────────────────────────────────────────
+# ── Hourly-max-one-purchase cache + Pulse on purchase ─────────────────────────
+
+def emit_sync_event(dataset: str, records_purchased: int, amount_usdc: float):
+    """
+    Best-effort `sync` Pulse event emitted right after a successful x402 buy.
+    Pulse failures are logged at warning level and never break enrichment.
+    """
+    if not RESOLVED_API_KEY:
+        log.warning("RESOLVED_API_KEY not set — skipping sync Pulse event")
+        return
+    body = {
+        "event_type": "sync",
+        "payload": {
+            "dataset":           dataset,
+            "records_purchased": records_purchased,
+            "amount_usdc":       amount_usdc,
+        },
+        "is_public": True,
+    }
+    try:
+        r = httpx.post(
+            f"{RESOLVED_BASE}/{WK_SUBDOMAIN}/events",
+            headers={
+                "Authorization": f"Bearer {RESOLVED_API_KEY}",
+                "Content-Type":  "application/json",
+            },
+            json=body,
+            timeout=10.0,
+        )
+        if r.status_code == 200:
+            event_id = r.json().get("event_id")
+            log.info("Sync Pulse emitted: dataset=%s records=%d amount=$%.4f event_id=%s",
+                     dataset, records_purchased, amount_usdc, event_id)
+        else:
+            log.warning("Sync Pulse failed %d: %s", r.status_code, r.text[:200])
+    except Exception as e:
+        log.warning("Sync Pulse error: %s", e)
+
 
 def _parse_jsonl_text(text: str) -> list[dict]:
     records = []
@@ -263,38 +305,48 @@ def save_cache_index(index: dict):
 def fetch_or_load(filename: str, cache_index: dict,
                   *, required: bool = False) -> tuple[list[dict], bool]:
     """
-    Get records for a DA file using the daily-max-one-purchase cache. Returns
+    Get records for a DA file using the hourly-max-one-purchase cache. Returns
     (records, was_purchased). Each dataset is purchased at most once per UTC
-    day; subsequent calls the same day reuse the on-disk cache file.
+    hour; subsequent calls within the same hour reuse the on-disk cache file.
+
+    Emits a `sync` Pulse event right after a successful x402 buy (best-effort —
+    Pulse failure is logged but does not fail the run).
 
     With required=False, a 404 from DA returns ([], False) — the file isn't
-    available on DA today (e.g. an optional delta feed not yet published).
+    available on DA at this time (e.g. an optional delta feed not yet published).
     """
-    today      = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    cache_path = CACHE_DIR / filename
-    last_date  = cache_index.get(filename)
+    current_hour = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H")
+    cache_path   = CACHE_DIR / filename
+    last_hour    = cache_index.get(filename)
 
-    if last_date == today and cache_path.exists():
-        log.info("Cache hit for %s — already purchased today (%s)", filename, today)
+    if last_hour == current_hour and cache_path.exists():
+        log.info("Cache hit for %s — already purchased this hour (%s)", filename, current_hour)
         return _read_jsonl(cache_path), False
 
-    if last_date == today:
-        log.warning("Index says %s purchased today but file is missing — re-purchasing",
+    if last_hour == current_hour:
+        log.warning("Index says %s purchased this hour but file is missing — re-purchasing",
                     filename)
-    elif last_date:
+    elif last_hour:
         log.info("Last purchase of %s was %s — purchasing again for %s",
-                 filename, last_date, today)
+                 filename, last_hour, current_hour)
     else:
         log.info("First purchase of %s", filename)
 
     download_url = f"{DOUBLE_AGENT_BASE}/data/{filename}"
-    records = x402_download(download_url, cache_path, allow_missing=not required)
+    records, amount_usdc = x402_download(
+        download_url, cache_path, allow_missing=not required,
+    )
 
     if records is None:
-        # File not available on DA today (only possible with required=False).
+        # File not available on DA right now (only possible with required=False).
         return [], False
 
-    cache_index[filename] = today
+    # Pulse first, before persisting the cache key — if Pulse logging is the
+    # only observability for purchases, we want the event emitted even if a
+    # later step (cache write) somehow fails. The helper is itself best-effort.
+    emit_sync_event(filename, len(records), amount_usdc)
+
+    cache_index[filename] = current_hour
     save_cache_index(cache_index)
     return records, True
 
@@ -532,7 +584,7 @@ def main():
         log.error("No company data received from Double Agent")
         sys.exit(1)
 
-    # Step 1b: optional delta feed — purchased once per day if DA publishes it
+    # Step 1b: optional delta feed — purchased once per hour if DA publishes it
     log.info("=== Acquiring DA delta feed (%s) ===", DA_DELTA_FILE)
     delta_records, purchased_delta = fetch_or_load(
         DA_DELTA_FILE, cache_index, required=False,
