@@ -11,13 +11,15 @@ Local outputs (dated, archive):
   data/x402-mcp-infrastructure-{date}.jsonl — MCP/oauth hits from x402 companies
   data/x402-wellknown-overview-{date}.jsonl — all 7 endpoint types for x402 companies
 
-For each grouped dataset, the script uploads twice per run:
-  1. Dated archive   — e.g. x402-agent-cards-2026-04-28.jsonl
-  2. Stable -latest  — e.g. x402-agent-cards-latest.jsonl  (idempotent upsert)
+Uploads use stable filenames so each PUT atomically upserts the same slot on
+the resolved.sh listing — no dated files accumulate, no cap pressure, no
+cleanup logic needed:
+  x402-agent-cards-latest.jsonl
+  x402-mcp-infrastructure-latest.jsonl
+  x402-wellknown-overview-latest.jsonl
 
-resolved.sh PUT is an atomic upsert — the latest alias replaces in place, the
-dated archive accumulates. After uploads finish, a cleanup pass DELETEs older
-dated versions, keeping only KEEP_VERSIONS most recent per dataset.
+Exits non-zero if any upload fails so the caller (post-crawl.sh) can emit an
+honest `success: true/false` Pulse event.
 """
 
 import base64
@@ -66,14 +68,10 @@ DA_DELTA_FILE     = "x402_new_activity_feed.jsonl"     # optional delta feed (~$
 CACHE_DIR   = REPO_ROOT / "pipeline" / "cache"
 CACHE_INDEX = CACHE_DIR / "da_last_purchased.json"
 
-# x402 dataset patterns published from this script. Used for old-version cleanup.
-X402_DATASET_PATTERNS = [
-    "x402-agent-cards-{date}.jsonl",
-    "x402-mcp-infrastructure-{date}.jsonl",
-    "x402-wellknown-overview-{date}.jsonl",
-]
-KEEP_VERSIONS = 2
-DATE_RE       = r"\d{4}-\d{2}-\d{2}"
+# Stable upload filenames — re-PUT each run is an atomic upsert.
+X402_AGENT_CARDS_UPLOAD = "x402-agent-cards-latest.jsonl"
+X402_MCP_INFRA_UPLOAD   = "x402-mcp-infrastructure-latest.jsonl"
+X402_OVERVIEW_UPLOAD    = "x402-wellknown-overview-latest.jsonl"
 
 # USDC on Base Mainnet
 USDC_CONTRACT = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"
@@ -320,12 +318,17 @@ def extract_domain(value: str) -> str:
 def build_domain_index(records: list[dict]) -> dict[str, dict]:
     """
     Build a domain → company record index from Double Agent data.
-    Tries common field names for the domain/URL.
+
+    Field-name fallback chain (DA's schema as of 2026-04):
+      domain_primary  → canonical
+      domain_secondary → secondary domain when set
+      domain / website / url / github_url → older field names, kept as
+        forward-compat fallbacks
     """
     index = {}
     for rec in records:
-        # Double Agent records likely have domain or website field
         raw = (
+            rec.get("domain_primary") or rec.get("domain_secondary") or
             rec.get("domain") or rec.get("website") or
             rec.get("url") or rec.get("github_url") or ""
         )
@@ -458,16 +461,14 @@ def generate_x402_wellknown_overview(crawl_records: list[dict]) -> list[dict]:
 
 # ── Upload helpers ────────────────────────────────────────────────────────────
 
-def upload_file(client: httpx.Client, path: Path,
+def upload_file(client: httpx.Client, path: Path, upload_filename: str,
                 price_usdc: float, query_price: float, download_price: float,
-                description: str, *, upload_as: str = None):
+                description: str) -> bool:
     """
-    Upload a local JSONL file to resolved.sh and patch its description+pricing.
-    By default the file is uploaded under its on-disk name (dated archive);
-    pass `upload_as` to override (used to publish a stable `-latest` alias for
-    the same body).
+    Upload a local JSONL file to resolved.sh under a stable upload filename
+    and patch its description+pricing. Returns True on successful upload
+    (patch failures are warnings, not failures).
     """
-    upload_filename = upload_as or path.name
     url = f"{RESOLVED_BASE}/listing/{RESOURCE_ID}/data/{upload_filename}"
 
     with path.open("rb") as f:
@@ -481,7 +482,7 @@ def upload_file(client: httpx.Client, path: Path,
     )
     if r.status_code != 201:
         log.error("Upload failed for %s: %d %s", upload_filename, r.status_code, r.text[:200])
-        return
+        return False
 
     file_id = r.json().get("id")
     log.info("Uploaded %s (from %s) (id: %s)", upload_filename, path.name, file_id)
@@ -499,53 +500,7 @@ def upload_file(client: httpx.Client, path: Path,
         log.info("Patched description for %s", upload_filename)
     else:
         log.warning("Patch failed for %s: %d", upload_filename, patch.status_code)
-
-
-def list_listing_files(client: httpx.Client) -> list:
-    """List current files on the WK listing."""
-    r = client.get(f"{RESOLVED_BASE}/listing/{RESOURCE_ID}/data")
-    if r.status_code == 200:
-        return r.json().get("files", []) or []
-    log.warning("List files failed: %d %s", r.status_code, r.text[:200])
-    return []
-
-
-def delete_listing_file(client: httpx.Client, file_id: str) -> bool:
-    """Delete a listing file by its UUID."""
-    r = client.delete(f"{RESOLVED_BASE}/listing/{RESOURCE_ID}/data/{file_id}")
-    if r.status_code == 204:
-        log.info("Deleted file %s", file_id)
-        return True
-    log.warning("Delete failed for %s: %d %s", file_id, r.status_code, r.text[:200])
-    return False
-
-
-def cleanup_old_versions(client: httpx.Client, patterns: list,
-                         keep: int = KEEP_VERSIONS) -> int:
-    """
-    DELETE old dated versions of each dataset pattern, keeping the `keep`
-    most recent (sorted by embedded YYYY-MM-DD desc). The stable `-latest`
-    aliases are unaffected — they don't match the dated regex.
-    """
-    files   = list_listing_files(client)
-    deleted = 0
-    for pattern in patterns:
-        if "{date}" not in pattern:
-            continue
-        prefix, ext = pattern.split("{date}", 1)
-        rx = re.compile(r"^" + re.escape(prefix) + r"(" + DATE_RE + r")" + re.escape(ext) + r"$")
-        matches = []
-        for f in files:
-            m = rx.match(f.get("filename", ""))
-            if m:
-                matches.append((m.group(1), f["filename"], f["id"]))
-        matches.sort(key=lambda x: x[0], reverse=True)
-        for date_str, filename, file_id in matches[keep:]:
-            log.info("Cleanup: deleting old %s (id=%s, date=%s)",
-                     filename, file_id, date_str)
-            if delete_listing_file(client, file_id):
-                deleted += 1
-    return deleted
+    return True
 
 
 def write_jsonl(path: Path, records: list[dict]):
@@ -653,45 +608,30 @@ def main():
         f"Updated weekly."
     )
 
+    upload_results = []
     with httpx.Client(headers=auth_headers, timeout=60.0) as client:
-        # Each dataset is uploaded twice: dated archive + stable -latest alias.
-        # The -latest alias is the discovery-stable filename for buyers (DA's
-        # enrich-with-WK script) so they don't have to chase dated filenames.
-        upload_file(client, agent_cards_path,
-                    price_usdc=0.10, query_price=0.10, download_price=0.25,
-                    description=agent_cards_desc)
-        upload_file(client, agent_cards_path,
-                    price_usdc=0.10, query_price=0.10, download_price=0.25,
-                    description=agent_cards_desc,
-                    upload_as="x402-agent-cards-latest.jsonl")
-
-        upload_file(client, mcp_infra_path,
-                    price_usdc=0.10, query_price=0.10, download_price=0.25,
-                    description=mcp_infra_desc)
-        upload_file(client, mcp_infra_path,
-                    price_usdc=0.10, query_price=0.10, download_price=0.25,
-                    description=mcp_infra_desc,
-                    upload_as="x402-mcp-infrastructure-latest.jsonl")
-
-        upload_file(client, overview_path,
-                    price_usdc=0.15, query_price=0.15, download_price=0.50,
-                    description=overview_desc)
-        upload_file(client, overview_path,
-                    price_usdc=0.15, query_price=0.15, download_price=0.50,
-                    description=overview_desc,
-                    upload_as="x402-wellknown-overview-latest.jsonl")
-
-        # Sweep older dated versions; -latest aliases are unaffected.
-        log.info("=== Cleanup: pruning old dated versions ===")
-        deleted = cleanup_old_versions(client, X402_DATASET_PATTERNS, keep=KEEP_VERSIONS)
-        log.info("Deleted %d old dated version(s) (kept %d per dataset)",
-                 deleted, KEEP_VERSIONS)
+        upload_results.append(upload_file(
+            client, agent_cards_path, X402_AGENT_CARDS_UPLOAD,
+            price_usdc=0.10, query_price=0.10, download_price=0.25,
+            description=agent_cards_desc))
+        upload_results.append(upload_file(
+            client, mcp_infra_path, X402_MCP_INFRA_UPLOAD,
+            price_usdc=0.10, query_price=0.10, download_price=0.25,
+            description=mcp_infra_desc))
+        upload_results.append(upload_file(
+            client, overview_path, X402_OVERVIEW_UPLOAD,
+            price_usdc=0.15, query_price=0.15, download_price=0.50,
+            description=overview_desc))
 
     log.info("=== Enrichment complete ===")
     log.info("Agent Cards:       %d records", len(agent_cards))
     log.info("MCP Infrastructure:%d records", len(mcp_infra))
     log.info("WK Overview:       %d rows",    len(overview))
     log.info("Double Agent cache index: %s", CACHE_INDEX)
+    log.info("Uploads succeeded: %d/%d", sum(upload_results), len(upload_results))
+
+    if not all(upload_results):
+        sys.exit(1)
 
 
 if __name__ == "__main__":
