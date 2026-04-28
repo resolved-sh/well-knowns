@@ -30,15 +30,74 @@ Delta record schema (one row per change):
 """
 import hashlib
 import json
+import os
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+
+import httpx
 
 REPO_ROOT  = Path(__file__).parent.parent
 DATA_DIR   = REPO_ROOT / "data"
 CRAWL_PATH = DATA_DIR / "raw-crawl.jsonl"
 CHECKPOINT = DATA_DIR / "signals_checkpoint.json"
 DELTA_PATH = DATA_DIR / "signals_delta.jsonl"
+
+RESOLVED_BASE = "https://resolved.sh"
+WK_SUBDOMAIN  = "well-knowns"
+
+
+def load_dotenv():
+    env_path = REPO_ROOT / ".env"
+    if not env_path.exists():
+        return
+    for line in env_path.read_text().splitlines():
+        line = line.strip()
+        if line and not line.startswith("#") and "=" in line:
+            k, _, v = line.partition("=")
+            os.environ.setdefault(k, v)
+
+
+def emit_monitor_event(signals_checked: int, new_signals: int):
+    """
+    Emit a `monitor` Pulse heartbeat for this delta-cycle run. Fires on every
+    invocation (including empty-delta no-ops) so the WK pulse feed shows
+    regular activity at the schedule's cadence, not just when new data lands.
+
+    Best-effort: missing API key or network errors log a warning and return
+    rather than failing the script.
+    """
+    api_key = os.environ.get("RESOLVED_API_KEY", "")
+    if not api_key:
+        print("WARN: RESOLVED_API_KEY not set — skipping monitor heartbeat")
+        return
+    body = {
+        "event_type": "monitor",
+        "payload": {
+            "status":          "healthy",
+            "signals_checked": signals_checked,
+            "new_signals":     new_signals,
+        },
+        "is_public": True,
+    }
+    try:
+        r = httpx.post(
+            f"{RESOLVED_BASE}/{WK_SUBDOMAIN}/events",
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type":  "application/json",
+            },
+            json=body,
+            timeout=10.0,
+        )
+        if r.status_code == 200:
+            event_id = r.json().get("event_id")
+            print(f"Monitor heartbeat emitted (signals_checked={signals_checked}, "
+                  f"new_signals={new_signals}, event_id={event_id})")
+        else:
+            print(f"WARN: monitor emit failed {r.status_code} {r.text[:200]}")
+    except Exception as e:
+        print(f"WARN: monitor emit error: {e}")
 
 
 def signature(endpoint_data) -> str:
@@ -97,6 +156,8 @@ def write_checkpoint(current_state: dict, detected_at: str):
 
 
 def main():
+    load_dotenv()
+
     if not CRAWL_PATH.exists():
         print(f"ERROR: {CRAWL_PATH} not found — run the crawl first", file=sys.stderr)
         sys.exit(1)
@@ -112,6 +173,7 @@ def main():
         DELTA_PATH.write_text("")
         write_checkpoint(current, detected_at)
         print(f"Bootstrapped checkpoint with {len(current)} signals — empty delta written")
+        emit_monitor_event(signals_checked=len(current), new_signals=0)
         return
 
     previous       = checkpoint.get("signatures", {})
@@ -165,6 +227,8 @@ def main():
         f"{len(deltas)} new/changed signals since {last_published} "
         f"(new={counts['new']} changed={counts['changed']} removed={counts['removed']})"
     )
+
+    emit_monitor_event(signals_checked=len(current), new_signals=len(deltas))
 
 
 if __name__ == "__main__":
