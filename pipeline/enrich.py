@@ -11,11 +11,13 @@ Local outputs (dated, archive):
   data/x402-mcp-infrastructure-{date}.jsonl — MCP/oauth hits from x402 companies
   data/x402-wellknown-overview-{date}.jsonl — all 7 endpoint types for x402 companies
 
-Uploads each grouped dataset under a fixed `-latest` filename so it replaces
-the prior version on the resolved.sh listing (avoids the 10-file cap):
-  x402-agent-cards-latest.jsonl
-  x402-mcp-infrastructure-latest.jsonl
-  x402-wellknown-overview-latest.jsonl
+For each grouped dataset, the script uploads twice per run:
+  1. Dated archive   — e.g. x402-agent-cards-2026-04-28.jsonl
+  2. Stable -latest  — e.g. x402-agent-cards-latest.jsonl  (idempotent upsert)
+
+resolved.sh PUT is an atomic upsert — the latest alias replaces in place, the
+dated archive accumulates. After uploads finish, a cleanup pass DELETEs older
+dated versions, keeping only KEEP_VERSIONS most recent per dataset.
 """
 
 import base64
@@ -63,6 +65,15 @@ DA_DELTA_FILE     = "x402_new_activity_feed.jsonl"     # optional delta feed (~$
 # Index format: {"<filename>": "YYYY-MM-DD"} — date of last purchase per dataset.
 CACHE_DIR   = REPO_ROOT / "pipeline" / "cache"
 CACHE_INDEX = CACHE_DIR / "da_last_purchased.json"
+
+# x402 dataset patterns published from this script. Used for old-version cleanup.
+X402_DATASET_PATTERNS = [
+    "x402-agent-cards-{date}.jsonl",
+    "x402-mcp-infrastructure-{date}.jsonl",
+    "x402-wellknown-overview-{date}.jsonl",
+]
+KEEP_VERSIONS = 2
+DATE_RE       = r"\d{4}-\d{2}-\d{2}"
 
 # USDC on Base Mainnet
 USDC_CONTRACT = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"
@@ -447,15 +458,16 @@ def generate_x402_wellknown_overview(crawl_records: list[dict]) -> list[dict]:
 
 # ── Upload helpers ────────────────────────────────────────────────────────────
 
-def upload_file(client: httpx.Client, path: Path, upload_filename: str,
+def upload_file(client: httpx.Client, path: Path,
                 price_usdc: float, query_price: float, download_price: float,
-                description: str):
+                description: str, *, upload_as: str = None):
     """
-    Upload a local JSONL file to resolved.sh under upload_filename and patch
-    its description. The local path keeps its dated archive name; the upload
-    name is fixed (e.g. `x402-agent-cards-latest.jsonl`) so each upload
-    replaces the prior version on the listing.
+    Upload a local JSONL file to resolved.sh and patch its description+pricing.
+    By default the file is uploaded under its on-disk name (dated archive);
+    pass `upload_as` to override (used to publish a stable `-latest` alias for
+    the same body).
     """
+    upload_filename = upload_as or path.name
     url = f"{RESOLVED_BASE}/listing/{RESOURCE_ID}/data/{upload_filename}"
 
     with path.open("rb") as f:
@@ -467,7 +479,7 @@ def upload_file(client: httpx.Client, path: Path, upload_filename: str,
         params={"price_usdc": str(price_usdc)},
         headers={"Content-Type": "application/jsonl"},
     )
-    if r.status_code not in (200, 201):
+    if r.status_code != 201:
         log.error("Upload failed for %s: %d %s", upload_filename, r.status_code, r.text[:200])
         return
 
@@ -487,6 +499,53 @@ def upload_file(client: httpx.Client, path: Path, upload_filename: str,
         log.info("Patched description for %s", upload_filename)
     else:
         log.warning("Patch failed for %s: %d", upload_filename, patch.status_code)
+
+
+def list_listing_files(client: httpx.Client) -> list:
+    """List current files on the WK listing."""
+    r = client.get(f"{RESOLVED_BASE}/listing/{RESOURCE_ID}/data")
+    if r.status_code == 200:
+        return r.json().get("files", []) or []
+    log.warning("List files failed: %d %s", r.status_code, r.text[:200])
+    return []
+
+
+def delete_listing_file(client: httpx.Client, file_id: str) -> bool:
+    """Delete a listing file by its UUID."""
+    r = client.delete(f"{RESOLVED_BASE}/listing/{RESOURCE_ID}/data/{file_id}")
+    if r.status_code == 204:
+        log.info("Deleted file %s", file_id)
+        return True
+    log.warning("Delete failed for %s: %d %s", file_id, r.status_code, r.text[:200])
+    return False
+
+
+def cleanup_old_versions(client: httpx.Client, patterns: list,
+                         keep: int = KEEP_VERSIONS) -> int:
+    """
+    DELETE old dated versions of each dataset pattern, keeping the `keep`
+    most recent (sorted by embedded YYYY-MM-DD desc). The stable `-latest`
+    aliases are unaffected — they don't match the dated regex.
+    """
+    files   = list_listing_files(client)
+    deleted = 0
+    for pattern in patterns:
+        if "{date}" not in pattern:
+            continue
+        prefix, ext = pattern.split("{date}", 1)
+        rx = re.compile(r"^" + re.escape(prefix) + r"(" + DATE_RE + r")" + re.escape(ext) + r"$")
+        matches = []
+        for f in files:
+            m = rx.match(f.get("filename", ""))
+            if m:
+                matches.append((m.group(1), f["filename"], f["id"]))
+        matches.sort(key=lambda x: x[0], reverse=True)
+        for date_str, filename, file_id in matches[keep:]:
+            log.info("Cleanup: deleting old %s (id=%s, date=%s)",
+                     filename, file_id, date_str)
+            if delete_listing_file(client, file_id):
+                deleted += 1
+    return deleted
 
 
 def write_jsonl(path: Path, records: list[dict]):
@@ -570,41 +629,63 @@ def main():
     # ── Step 5: Upload to resolved.sh ────────────────────────────────────────
     log.info("=== Uploading grouped datasets to resolved.sh ===")
     auth_headers = {"Authorization": f"Bearer {RESOLVED_API_KEY}"}
+
+    agent_cards_desc = (
+        f"agent-card.json results filtered to x402 ecosystem companies only "
+        f"({len(agent_cards)} records). Cross-referenced with Double Agent company "
+        f"intelligence. Columns: domain, rank, name, description, url, skills, "
+        f"capabilities, x402_company_name, x402_category, x402_status. "
+        f"Source: Tranco top 100k crawl + Double Agent. Updated weekly."
+    )
+    mcp_infra_desc = (
+        f"MCP server and oauth-protected-resource endpoints from x402 ecosystem "
+        f"companies ({len(mcp_infra)} records). Cross-referenced with Double Agent. "
+        f"Columns: domain, rank, mcp_json, oauth_protected_resource, x402_company_name, "
+        f"x402_category, x402_status. Source: Tranco top 100k crawl + Double Agent. "
+        f"Updated weekly."
+    )
+    overview_desc = (
+        f"All 7 well-known endpoint types for x402 ecosystem companies "
+        f"({len(overview)} rows, one per endpoint hit). Combines crawl data with "
+        f"Double Agent business intelligence. Columns: domain, rank, endpoint, "
+        f"raw_content, x402_company_name, x402_category, x402_status, "
+        f"x402_has_agent_card. Source: Tranco top 100k crawl + Double Agent. "
+        f"Updated weekly."
+    )
+
     with httpx.Client(headers=auth_headers, timeout=60.0) as client:
-        upload_file(
-            client, agent_cards_path, "x402-agent-cards-latest.jsonl",
-            price_usdc=0.10, query_price=0.10, download_price=0.25,
-            description=(
-                f"agent-card.json results filtered to x402 ecosystem companies only "
-                f"({len(agent_cards)} records). Cross-referenced with Double Agent company "
-                f"intelligence. Columns: domain, rank, name, description, url, skills, "
-                f"capabilities, x402_company_name, x402_category, x402_status. "
-                f"Source: Tranco top 100k crawl + Double Agent. Updated weekly."
-            )
-        )
-        upload_file(
-            client, mcp_infra_path, "x402-mcp-infrastructure-latest.jsonl",
-            price_usdc=0.10, query_price=0.10, download_price=0.25,
-            description=(
-                f"MCP server and oauth-protected-resource endpoints from x402 ecosystem "
-                f"companies ({len(mcp_infra)} records). Cross-referenced with Double Agent. "
-                f"Columns: domain, rank, mcp_json, oauth_protected_resource, x402_company_name, "
-                f"x402_category, x402_status. Source: Tranco top 100k crawl + Double Agent. "
-                f"Updated weekly."
-            )
-        )
-        upload_file(
-            client, overview_path, "x402-wellknown-overview-latest.jsonl",
-            price_usdc=0.15, query_price=0.15, download_price=0.50,
-            description=(
-                f"All 7 well-known endpoint types for x402 ecosystem companies "
-                f"({len(overview)} rows, one per endpoint hit). Combines crawl data with "
-                f"Double Agent business intelligence. Columns: domain, rank, endpoint, "
-                f"raw_content, x402_company_name, x402_category, x402_status, "
-                f"x402_has_agent_card. Source: Tranco top 100k crawl + Double Agent. "
-                f"Updated weekly."
-            )
-        )
+        # Each dataset is uploaded twice: dated archive + stable -latest alias.
+        # The -latest alias is the discovery-stable filename for buyers (DA's
+        # enrich-with-WK script) so they don't have to chase dated filenames.
+        upload_file(client, agent_cards_path,
+                    price_usdc=0.10, query_price=0.10, download_price=0.25,
+                    description=agent_cards_desc)
+        upload_file(client, agent_cards_path,
+                    price_usdc=0.10, query_price=0.10, download_price=0.25,
+                    description=agent_cards_desc,
+                    upload_as="x402-agent-cards-latest.jsonl")
+
+        upload_file(client, mcp_infra_path,
+                    price_usdc=0.10, query_price=0.10, download_price=0.25,
+                    description=mcp_infra_desc)
+        upload_file(client, mcp_infra_path,
+                    price_usdc=0.10, query_price=0.10, download_price=0.25,
+                    description=mcp_infra_desc,
+                    upload_as="x402-mcp-infrastructure-latest.jsonl")
+
+        upload_file(client, overview_path,
+                    price_usdc=0.15, query_price=0.15, download_price=0.50,
+                    description=overview_desc)
+        upload_file(client, overview_path,
+                    price_usdc=0.15, query_price=0.15, download_price=0.50,
+                    description=overview_desc,
+                    upload_as="x402-wellknown-overview-latest.jsonl")
+
+        # Sweep older dated versions; -latest aliases are unaffected.
+        log.info("=== Cleanup: pruning old dated versions ===")
+        deleted = cleanup_old_versions(client, X402_DATASET_PATTERNS, keep=KEEP_VERSIONS)
+        log.info("Deleted %d old dated version(s) (kept %d per dataset)",
+                 deleted, KEEP_VERSIONS)
 
     log.info("=== Enrichment complete ===")
     log.info("Agent Cards:       %d records", len(agent_cards))
