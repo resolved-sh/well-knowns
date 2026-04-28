@@ -17,17 +17,18 @@ RESOURCE_ID = "ef9f56ad-11a4-43e7-9171-fd108d194ad8"
 BASE_URL    = "https://resolved.sh"
 DATA_DIR    = Path(__file__).parent.parent / "data"
 
-# Price map: filename → price_usdc (LAUNCH PRICES - dirt cheap!)
-PRODUCT_PRICES = {
-    "agent-index-{date}.json":          "0.10",
-    "oidc-providers-{date}.json":      "0.25",
-    "mcp-infrastructure-{date}.json":   "0.10",
-    "full-catalog-{date}.jsonl":       "1.00",
-    "delta-{date}.jsonl":              "0.01",
-    "full-catalog-{date}.jsonl":       "1.00",
+# Products to upload. Local filenames stay date-stamped (archive); upload
+# filenames use a fixed `-latest` suffix so each upload replaces the prior
+# version on resolved.sh — keeps the listing under the 10-file cap.
+PRODUCTS = [
+    {"local": "agent-index-{date}.json",        "upload": "agent-index-latest.json",        "price": "0.10"},
+    {"local": "oidc-providers-{date}.json",     "upload": "oidc-providers-latest.json",     "price": "0.25"},
+    {"local": "mcp-infrastructure-{date}.json", "upload": "mcp-infrastructure-latest.json", "price": "0.10"},
+    {"local": "full-catalog-{date}.jsonl",      "upload": "full-catalog-latest.jsonl",      "price": "1.00"},
+    {"local": "delta-{date}.jsonl",             "upload": "delta-latest.jsonl",             "price": "0.01"},
     # catalog-manifest.json is published directly on the listing page for free
     # (not uploaded as a paid file)
-}
+]
 
 logging.basicConfig(
     level=logging.INFO,
@@ -48,14 +49,14 @@ def content_type_for(filename: str) -> str:
     }.get(ext, "application/octet-stream")
 
 
-def upload_file(client: httpx.Client, filepath: Path, price_usdc: str) -> dict:
-    """PUT a data file to resolved.sh."""
-    filename = filepath.name
-    url = f"{BASE_URL}/listing/{RESOURCE_ID}/data/{filename}"
+def upload_file(client: httpx.Client, filepath: Path, upload_filename: str,
+                price_usdc: str) -> dict:
+    """PUT a local data file to resolved.sh under upload_filename."""
+    url = f"{BASE_URL}/listing/{RESOURCE_ID}/data/{upload_filename}"
     # Minimum price is 0.01 — set free files to 0.01
     price_val = max(0.01, float(price_usdc)) if price_usdc else 0.01
     params = {"price_usdc": str(price_val)}
-    ctype = content_type_for(filename)
+    ctype = content_type_for(upload_filename)
     headers = {"Content-Type": ctype}
     try:
         with filepath.open("rb") as f:
@@ -66,15 +67,17 @@ def upload_file(client: httpx.Client, filepath: Path, price_usdc: str) -> dict:
 
     try:
         r = client.put(url, content=body, params=params, headers=headers)
-        if r.status_code == 201:
+        if r.status_code in (200, 201):
             result = r.json()
-            log.info("Uploaded %s @ $%s — %s", filename, price_usdc, result.get("id", ""))
+            log.info("Uploaded %s (from %s) @ $%s — %s",
+                     upload_filename, filepath.name, price_usdc, result.get("id", ""))
             return result
         else:
-            log.error("Upload failed for %s: %d %s", filename, r.status_code, r.text[:200])
+            log.error("Upload failed for %s: %d %s",
+                      upload_filename, r.status_code, r.text[:200])
             return {"error": f"{r.status_code}: {r.text[:200]}"}
     except Exception as e:
-        log.error("Request error uploading %s: %s", filename, e)
+        log.error("Request error uploading %s: %s", upload_filename, e)
         return {"error": str(e)}
 
 
@@ -130,34 +133,39 @@ def main():
     # Build a map of existing files by filename
     existing_by_name = {f["filename"]: f["id"] for f in existing}
 
-    # Optionally delete existing files before re-uploading
+    # Optionally delete existing upload-named files before re-uploading.
+    # PUT to a stable filename already upserts, so this is belt-and-suspenders.
     if args.replace:
-        for pattern, price in PRODUCT_PRICES.items():
-            filename = pattern.replace("{date}", date) if "{date}" in pattern else pattern
-            if filename in existing_by_name:
-                log.info("Deleting existing %s (id: %s) before replace", filename, existing_by_name[filename])
-                delete_file(client, existing_by_name[filename])
+        for product in PRODUCTS:
+            upload_filename = product["upload"]
+            if upload_filename in existing_by_name:
+                log.info("Deleting existing %s (id: %s) before replace",
+                         upload_filename, existing_by_name[upload_filename])
+                delete_file(client, existing_by_name[upload_filename])
 
     # Upload each matching product
     uploaded = []
     errors   = []
 
-    for pattern, price in PRODUCT_PRICES.items():
-        if "{date}" in pattern:
-            filename = pattern.replace("{date}", date)
-        else:
-            filename = pattern
+    for product in PRODUCTS:
+        local_pattern   = product["local"]
+        upload_filename = product["upload"]
+        price           = product["price"]
 
-        filepath = DATA_DIR / filename
+        local_filename = (
+            local_pattern.replace("{date}", date) if "{date}" in local_pattern
+            else local_pattern
+        )
+        filepath = DATA_DIR / local_filename
         if not filepath.exists():
             log.info("Skipping (not found): %s", filepath)
             continue
 
-        result = upload_file(client, filepath, price)
+        result = upload_file(client, filepath, upload_filename, price)
         if "error" in result:
-            errors.append({"file": filename, "error": result["error"]})
+            errors.append({"file": upload_filename, "error": result["error"]})
         else:
-            uploaded.append({"file": filename, "price": price, "id": result.get("id")})
+            uploaded.append({"file": upload_filename, "price": price, "id": result.get("id")})
 
     log.info("\n=== Upload Summary ===")
     log.info("Uploaded:  %d", len(uploaded))

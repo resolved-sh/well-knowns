@@ -5,13 +5,17 @@ pipeline/enrich.py
 Buys Double Agent's x402 ecosystem company data and cross-references it
 with our well-known endpoint crawl data to produce premium grouped datasets.
 
-Outputs:
-  data/double-agent-companies-{date}.jsonl  — cached copy of purchased data
+Local outputs (dated, archive):
+  pipeline/cache/{da-filename}              — cached DA purchases (max one per day)
   data/x402-agent-cards-{date}.jsonl        — agent-card hits from x402 companies
   data/x402-mcp-infrastructure-{date}.jsonl — MCP/oauth hits from x402 companies
   data/x402-wellknown-overview-{date}.jsonl — all 7 endpoint types for x402 companies
 
-Uploads the three grouped datasets to resolved.sh and patches their descriptions.
+Uploads each grouped dataset under a fixed `-latest` filename so it replaces
+the prior version on the resolved.sh listing (avoids the 10-file cap):
+  x402-agent-cards-latest.jsonl
+  x402-mcp-infrastructure-latest.jsonl
+  x402-wellknown-overview-latest.jsonl
 """
 
 import base64
@@ -443,11 +447,16 @@ def generate_x402_wellknown_overview(crawl_records: list[dict]) -> list[dict]:
 
 # ── Upload helpers ────────────────────────────────────────────────────────────
 
-def upload_file(client: httpx.Client, path: Path, price_usdc: float,
-                query_price: float, download_price: float, description: str):
-    """Upload a JSONL file to resolved.sh and patch its description."""
-    filename = path.name
-    url = f"{RESOLVED_BASE}/listing/{RESOURCE_ID}/data/{filename}"
+def upload_file(client: httpx.Client, path: Path, upload_filename: str,
+                price_usdc: float, query_price: float, download_price: float,
+                description: str):
+    """
+    Upload a local JSONL file to resolved.sh under upload_filename and patch
+    its description. The local path keeps its dated archive name; the upload
+    name is fixed (e.g. `x402-agent-cards-latest.jsonl`) so each upload
+    replaces the prior version on the listing.
+    """
+    url = f"{RESOLVED_BASE}/listing/{RESOURCE_ID}/data/{upload_filename}"
 
     with path.open("rb") as f:
         body = f.read()
@@ -459,11 +468,11 @@ def upload_file(client: httpx.Client, path: Path, price_usdc: float,
         headers={"Content-Type": "application/jsonl"},
     )
     if r.status_code not in (200, 201):
-        log.error("Upload failed for %s: %d %s", filename, r.status_code, r.text[:200])
+        log.error("Upload failed for %s: %d %s", upload_filename, r.status_code, r.text[:200])
         return
 
     file_id = r.json().get("id")
-    log.info("Uploaded %s (id: %s)", filename, file_id)
+    log.info("Uploaded %s (from %s) (id: %s)", upload_filename, path.name, file_id)
 
     # Patch description + pricing
     patch = client.patch(
@@ -475,9 +484,9 @@ def upload_file(client: httpx.Client, path: Path, price_usdc: float,
         },
     )
     if patch.status_code == 200:
-        log.info("Patched description for %s", filename)
+        log.info("Patched description for %s", upload_filename)
     else:
-        log.warning("Patch failed for %s: %d", filename, patch.status_code)
+        log.warning("Patch failed for %s: %d", upload_filename, patch.status_code)
 
 
 def write_jsonl(path: Path, records: list[dict]):
@@ -563,7 +572,7 @@ def main():
     auth_headers = {"Authorization": f"Bearer {RESOLVED_API_KEY}"}
     with httpx.Client(headers=auth_headers, timeout=60.0) as client:
         upload_file(
-            client, agent_cards_path,
+            client, agent_cards_path, "x402-agent-cards-latest.jsonl",
             price_usdc=0.10, query_price=0.10, download_price=0.25,
             description=(
                 f"agent-card.json results filtered to x402 ecosystem companies only "
@@ -574,7 +583,7 @@ def main():
             )
         )
         upload_file(
-            client, mcp_infra_path,
+            client, mcp_infra_path, "x402-mcp-infrastructure-latest.jsonl",
             price_usdc=0.10, query_price=0.10, download_price=0.25,
             description=(
                 f"MCP server and oauth-protected-resource endpoints from x402 ecosystem "
@@ -585,7 +594,7 @@ def main():
             )
         )
         upload_file(
-            client, overview_path,
+            client, overview_path, "x402-wellknown-overview-latest.jsonl",
             price_usdc=0.15, query_price=0.15, download_price=0.50,
             description=(
                 f"All 7 well-known endpoint types for x402 ecosystem companies "
